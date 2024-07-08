@@ -266,35 +266,35 @@ async function getMetadataForCurrentFile(fileName: string, compiledJson: Datafor
     let finalQuery = "";
     let finalTables: Table[] = [];
 
-    if (tables === undefined){
-        return {tables: finalTables, fullQuery: finalQuery};
+    if (tables === undefined) {
+        return { tables: finalTables, fullQuery: finalQuery };
     }
 
     for (let i = 0; i < tables.length; i++) {
         let table = tables[i];
         let tableFileName = path.basename(table.fileName).split('.')[0];
         if (fileName === tableFileName) {
-            if (table.type === "table"){
+            if (table.type === "table") {
                 finalQuery = table.query + "\n ;";
-            } else if (table.type === "incremental"){
+            } else if (table.type === "incremental") {
                 finalQuery += "\n-- Non incremental query \n";
                 finalQuery += table.query;
                 finalQuery += "; \n-- Incremental query \n";
                 finalQuery += table.incrementalQuery;
-                if (table?.incrementalPreOps){
+                if (table?.incrementalPreOps) {
                     table.incrementalPreOps.forEach((query, idx) => {
                         finalQuery += `; \n -- Incremental pre operations: [${idx}] \n`;
                         finalQuery += query;
                     });
                 }
             }
-            let tableFound = { type: table.type, tags: table.tags, fileName: fileName, query: table.query, target: table.target, incrementalQuery: table?.incrementalQuery ?? "", incrementalPreOps: table?.incrementalPreOps ?? []};
+            let tableFound = { type: table.type, tags: table.tags, fileName: fileName, query: table.query, target: table.target, incrementalQuery: table?.incrementalQuery ?? "", incrementalPreOps: table?.incrementalPreOps ?? [] };
             finalTables.push(tableFound);
             break;
         }
     }
 
-    if (assertions === undefined){
+    if (assertions === undefined) {
         return { tables: finalTables, fullQuery: finalQuery };
     }
 
@@ -337,13 +337,13 @@ function compileDataform(workspaceFolder: string): Promise<string> {
             if (code === 0) {
                 resolve(stdOut);
             } else {
-                if (stdOut !== ''){
+                if (stdOut !== '') {
                     let compiledJson = JSON.parse(stdOut.toString());
                     let graphErrors = compiledJson.graphErrors.compilationErrors;
                     graphErrors.forEach((graphError: any) => {
                         vscode.window.showErrorMessage(`Error compiling Dataform: ${graphError.message}:   at ${graphError.fileName}`);
                     });
-                }else{
+                } else {
                     vscode.window.showErrorMessage(`Error compiling Dataform: ${errorOutput}`);
                 }
                 reject(new Error(`Process exited with code ${code}`));
@@ -357,9 +357,9 @@ function compileDataform(workspaceFolder: string): Promise<string> {
 }
 
 // Usage
-export async function runCompilation(workspaceFolder: string) {
+export async function runCompilation(dataformRootDirectory: string) {
     try {
-        let compileResult = await compileDataform(workspaceFolder);
+        let compileResult = await compileDataform(dataformRootDirectory);
         const dataformCompiledJson: DataformCompiledJson = JSON.parse(compileResult);
         return dataformCompiledJson;
     } catch (error) {
@@ -387,6 +387,39 @@ export async function getDependenciesAutoCompletionItems(compiledJson: DataformC
     return dependencies;
 }
 
+// Search for the `workflow_settings.yaml` file to determine Dataform root directory
+export async function getDataformRootInWorkspace(startPath: string): Promise<string | null> {
+    let currentDir = path.dirname(startPath);
+    let targetFileName = "workflow_settings.yaml";
+    let found = false;
+    while (!found) {
+        const files = await vscode.workspace.findFiles(
+            new vscode.RelativePattern(currentDir, targetFileName),
+            null,
+            1
+        );
+
+        if (files.length > 0) {
+            return path.dirname(files[0].fsPath);
+        }
+
+        currentDir = currentDir.split("/").slice(0, -1).join("/");
+    }
+    vscode.window.showErrorMessage('Could not find dataform project root directory');
+    return null;
+}
+
+export async function getActiveFileDir(): Promise<string> {
+    let activeFileDir = "";
+    if (vscode.window.activeTextEditor) {
+        activeFileDir = path.dirname(vscode.window.activeTextEditor.document.uri.fsPath);
+        return activeFileDir;
+    }
+    vscode.window.showErrorMessage('Could not find active file directory');
+    return activeFileDir;
+}
+
+
 
 export async function compiledQueryWtDryRun(document: vscode.TextDocument, diagnosticCollection: vscode.DiagnosticCollection, queryStringOffset: number, compiledSqlFilePath: string, showCompiledQueryInVerticalSplitOnSave: boolean | undefined) {
     // let startTime = new Date().getTime();
@@ -395,13 +428,13 @@ export async function compiledQueryWtDryRun(document: vscode.TextDocument, diagn
     var [filename, extension] = getFileNameFromDocument(document);
     if (filename === "" || extension === "") { return; }
 
-    let workspaceFolder = getWorkspaceFolder();
-    if (workspaceFolder === "") { return; }
-
     let configLineOffset = 0;
+    // get directory of the current active file
+    let activeFileDir = path.dirname(document.uri.fsPath);
+    let dataformRootDirectory = await getDataformRootInWorkspace(activeFileDir);
 
     // Currently inline diagnostics are only supported for .sqlx files
-    if (extension === "sqlx"){
+    if (extension === "sqlx") {
         let configBlockRange = getLineNumberWhereConfigBlockTerminates();
         let configBlockStart = configBlockRange.startLine || 0;
         let configBlockEnd = configBlockRange.endLine || 0;
@@ -409,10 +442,11 @@ export async function compiledQueryWtDryRun(document: vscode.TextDocument, diagn
         configLineOffset = configBlockOffset - queryStringOffset;
     }
 
-    let dataformCompiledJson = await runCompilation(workspaceFolder);
+    if (dataformRootDirectory === null || dataformRootDirectory === undefined) {
+        return;
+    }
+    let dataformCompiledJson = await runCompilation(dataformRootDirectory);
     if (dataformCompiledJson) {
-        // TODO: Call them asyc and do wait for all promises to settle
-
         let declarationsAndTargets = await getDependenciesAutoCompletionItems(dataformCompiledJson);
         let dataformTags = await getDataformTags(dataformCompiledJson);
         let tableMetadata = await getMetadataForCurrentFile(filename, dataformCompiledJson);

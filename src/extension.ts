@@ -1,6 +1,7 @@
 // The module 'vscode' contains the VS Code extensibility API
 // Import the module and reference it with the alias vscode in your code below
 import * as vscode from 'vscode';
+import path from 'path';
 import { exec as exec } from 'child_process';
 
 let isEnabled = true;
@@ -35,11 +36,11 @@ let _dataformCodeActionProviderDisposable: vscode.Disposable | null = null;
 import { dataformCodeActionProviderDisposable, applyCodeActionUsingDiagnosticMessage } from './codeActionProvider';
 import { DataformRefDefinitionProvider } from './definitionProvider';
 import { executablesToCheck, compiledSqlFilePath, queryStringOffset } from './constants';
-import { executableIsAvailable, runCurrentFile, runCommandInTerminal, runCompilation } from './utils';
-import { getStdoutFromCliRun, getWorkspaceFolder, compiledQueryWtDryRun, getDependenciesAutoCompletionItems, getDataformTags} from './utils';
+import { executableIsAvailable, runCurrentFile, runCommandInTerminal, getActiveFileDir } from './utils';
+import { getStdoutFromCliRun, compiledQueryWtDryRun, getDataformRootInWorkspace } from './utils';
 import { editorSyncDisposable } from './sync';
 import { sourcesAutoCompletionDisposable, dependenciesAutoCompletionDisposable, tagsAutoCompletionDisposable } from './completions';
-import {  getRunTagsCommand, getRunTagsWtDepsCommand, getRunTagsWtDownstreamDepsCommand, getFormatDataformFileCommand } from './commands';
+import { getRunTagsCommand, getRunTagsWtDepsCommand, getRunTagsWtDownstreamDepsCommand, getFormatDataformFileCommand } from './commands';
 
 // This method is called when your extension is activated
 // Your extension is activated the very first time the command is executed
@@ -47,15 +48,6 @@ export async function activate(context: vscode.ExtensionContext) {
 
     for (let i = 0; i < executablesToCheck.length; i++) {
         executableIsAvailable(executablesToCheck[i]);
-    }
-
-    let workspaceFolder = getWorkspaceFolder();
-    //TODO: Load tags and sources on extension activation
-
-    let dataformCompiledJson = await runCompilation(workspaceFolder);
-    if (dataformCompiledJson){
-        declarationsAndTargets = await getDependenciesAutoCompletionItems(dataformCompiledJson);
-        dataformTags = await getDataformTags(dataformCompiledJson);
     }
 
     let diagnosticCollection = vscode.languages.createDiagnosticCollection('myDiagnostics');
@@ -181,13 +173,17 @@ export async function activate(context: vscode.ExtensionContext) {
                 onDidSelectItem: (tag) => {
                     // This is triggered as soon as a item is hovered over
                 }
-            }).then((selection) => {
+            }).then(async (selection) => {
                 if (!selection) {
                     return;
                 }
 
-                let runTagsCmd = getRunTagsCommand(workspaceFolder, selection);
-
+                let activeFileDir = await getActiveFileDir();
+                let dataformRootDirectory = await getDataformRootInWorkspace(activeFileDir);
+                if (dataformRootDirectory === null) {
+                    return;
+                }
+                let runTagsCmd = getRunTagsCommand(dataformRootDirectory, selection);
                 runCommandInTerminal(runTagsCmd);
             });
         });
@@ -202,12 +198,17 @@ export async function activate(context: vscode.ExtensionContext) {
                 onDidSelectItem: (tag) => {
                     // This is triggered as soon as a item is hovered over
                 }
-            }).then((selection) => {
+            }).then(async (selection) => {
                 if (!selection) {
                     return;
                 }
 
-                let runTagsWtDepsCommand = getRunTagsWtDepsCommand(workspaceFolder, selection);
+                let activeFileDir = await getActiveFileDir();
+                let dataformRootDirectory = await getDataformRootInWorkspace(activeFileDir);
+                if (dataformRootDirectory === null) {
+                    return;
+                }
+                let runTagsWtDepsCommand = getRunTagsWtDepsCommand(dataformRootDirectory, selection);
 
                 runCommandInTerminal(runTagsWtDepsCommand);
             });
@@ -223,12 +224,17 @@ export async function activate(context: vscode.ExtensionContext) {
                 onDidSelectItem: (tag) => {
                     // This is triggered as soon as a item is hovered over
                 }
-            }).then((selection) => {
+            }).then(async (selection) => {
                 if (!selection) {
                     return;
                 }
 
-                let runTagsWtDownstreamDepsCommand = getRunTagsWtDownstreamDepsCommand(workspaceFolder, selection);
+                let activeFileDir = await getActiveFileDir();
+                let dataformRootDirectory = await getDataformRootInWorkspace(activeFileDir);
+                if (dataformRootDirectory === null) {
+                    return;
+                }
+                let runTagsWtDownstreamDepsCommand = getRunTagsWtDownstreamDepsCommand(dataformRootDirectory, selection);
 
                 runCommandInTerminal(runTagsWtDownstreamDepsCommand);
             });

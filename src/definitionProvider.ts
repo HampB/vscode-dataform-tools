@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { getActiveFileDir, getDataformRootInWorkspace } from './utils';
 
 export class DataformRefDefinitionProvider implements vscode.DefinitionProvider {
     async provideDefinition(
@@ -14,7 +15,15 @@ export class DataformRefDefinitionProvider implements vscode.DefinitionProvider 
             return undefined;
         }
 
-        const fileUris = await vscode.workspace.findFiles('definitions/**/*');
+        let activeFileDir = await getActiveFileDir();
+        let dataformRootDirectory = await getDataformRootInWorkspace(activeFileDir);
+        if (dataformRootDirectory === null) {
+            return undefined;
+        }
+        const fileUris = await vscode.workspace.findFiles(
+            new vscode.RelativePattern(dataformRootDirectory, "**/*"),
+            '**/node_modules/**',
+        );
 
         let foundInDefinitionsDir = false;
 
